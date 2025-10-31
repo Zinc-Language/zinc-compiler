@@ -1,0 +1,119 @@
+// comment
+/// also comment
+/* comment */
+
+include file.class.{meathod, field};
+include file;
+
+int newInt = 1;
+int newIntHex = 0x1;
+int newIntOct = 0o1;
+int newIntBin = 0b1;
+int newIntChar = 'a';
+
+int newArray[10] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+
+char newChar = 'a';
+char newCharHex = 0x20;
+char newCharOct = 0o20;
+char newCharBin = 0b1010;
+
+utf8 newUtf8 = "hello world";
+utf16 newUtf16 = "hello world";
+utf32 newUtf32 = "hello world";
+
+// string is utf8 by default
+string newstring = "hello world";
+
+bool newBool = false; // 0
+bool otherBool = true; // 1
+bool otherOtherBool = 100; // true
+bool otherOtherOtherBool = -100; // true
+
+string newString = "Hello, zinc!";
+
+string* pointerString = &newString;
+
+// ~ // NOT
+// & // AND
+// | // OR
+// ^ // XOR
+// << // bitshift left
+// >> // bitshift right
+
+// err type has a message, and a error code
+
+// standard type declarations of functions are like that of C
+int main(list<string> args) {
+    int result = Foo.divide(10, 0).catch((Err e) => {
+        print(e.message);
+        // return a value of the same type
+        return -1;
+    });
+    assert(result != -1);
+
+    // smart pointers by default
+    char* charString = alloc char[100]('a'); // freed when all references leave the scope
+    // unsafe c-style pointers
+    unsafe_ptr<char> unsafeCharString = alloc char[100]('a'); // not freed when exits scope
+
+    // closures
+    int closure (int x) => { return x };
+
+    // if false, the error and abort.
+    assert(run_closure() == 11);
+
+    return 0;
+}
+
+int take_closure((int closure(int x)) {
+    return closure(10);
+}
+
+int run_closure() {
+    return take_closure((int x) => {return x + 1});
+}
+
+class Foo {
+    private int bar;
+    public int baz;
+
+    protected int prot = 1;
+
+    public int getBar() {
+        return bar;
+    }
+
+    public int getBaz() {
+        return baz;
+    }
+
+    public void setBar(int bar) {
+        return bar;
+    }
+    
+    // If you have a result type, you must always have an exit route and a return route.
+    public Result<int> divide(int x, int y) {
+        if (y == 0) {
+            // the integer and the string are both optional but you must have one.
+            error (1, "You can't divide by zero");
+        }
+        return x / y;
+    }
+
+    public Foo(int x, int y) {
+        bar = x;
+        baz = y;
+    }
+
+    private ~Foo() {
+        bar = 0;
+        baz = 0;
+    }
+}
+
+class Foo2 : Foo {
+    public void printProt() {
+        print(prot);
+    } 
+}
