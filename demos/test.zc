@@ -30,6 +30,16 @@ bool otherBool = true; // 1
 bool otherOtherBool = 100; // true
 bool otherOtherOtherBool = -100; // true
 
+enum Colors {
+    RED,
+    ORANGE,
+    YELLOW,
+    GREEN,
+    BLUE,
+    INDIGO, 
+    VIOLET,
+}
+
 string newString = "Hello, zinc!";
 
 string* pointerString = &newString;
@@ -45,6 +55,27 @@ string* pointerString = &newString;
 
 // standard type declarations of functions are like that of C
 int main(list<string> args) {
+    Color oldColr = Colors.YELLOW;
+    int newColor = Colors.RED;
+
+    switch(newColor) {
+        case RED {
+            println("Color is warm");
+        }
+        case ORANGE {
+            println("Color is orange");
+        }
+        case YELLOW {
+            println("Color is yellow");
+        }
+        default {
+            print("Not a known color")
+        }
+    }     
+
+    Vec<int> newVector = {1, 2, 3};
+    newVector.push_back(4);
+
     int result = Foo.divide(10, 0).catch((Err e) => {
         print(e.message);
         // return a value of the same type
@@ -52,21 +83,34 @@ int main(list<string> args) {
     });
     assert(result != -1);
 
+    // bubble up errors
+    int resultDoesntCare = Foo.divide(1, 0)?;
+
     // smart pointers by default
     char* charString = alloc char[100]('a'); // freed when all references leave the scope
     // unsafe c-style pointers
     unsafe_ptr<char> unsafeCharString = alloc char[100]('a'); // not freed when exits scope
 
     // closures
-    int closure (int x) => { return x };
+    int closure = (int x) => { return x };
 
     // if false, the error and abort.
     assert(run_closure() == 11);
 
+    int statusCode = getHttpResponse("google.com").await().catch((Err e) => {
+        print("Failed to get get https response");
+        return -1;
+    });
+    assert(statusCode != -1);
+
+    // .await() // returns a Result<type> and starts a new thread
+    // .await_timeout(int miliseconds) // starts a new thread and if it does not finish within a certain amount of time, kill it and return an error
+    // .await_ttl(int miliseconds) // starts and new thread and kills it after specified time
+
     return 0;
 }
 
-int take_closure((int closure(int x)) {
+int take_closure(int closure(int x)) {
     return closure(10);
 }
 
@@ -89,7 +133,7 @@ class Foo {
     }
 
     public void setBar(int bar) {
-        return bar;
+        this.bar = bar;
     }
     
     // If you have a result type, you must always have an exit route and a return route.
@@ -116,4 +160,12 @@ class Foo2 : Foo {
     public void printProt() {
         print(prot);
     } 
+}
+
+
+async int getHttpResponse(string url) {
+    // fake networking shit
+    int code = network.getCode(url);
+
+    return code;
 }
