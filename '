@@ -1,0 +1,194 @@
+use std::error::Error;
+use std::fs::File;
+use std::io::Read;
+use std::{char, env};
+
+#[derive(Debug)]
+enum TOKEN_TYPE {
+    Tok_If,
+    Tok_Else,
+    Tok_Let,
+    Tok_Return,
+    Tok_Plus,
+    Tok_Minus,
+    Tok_Times,
+    Tok_Divide,
+    Tok_Number,
+    Tok_Float,
+    Tok_Bracket,
+    Tok_Brace,
+    Tok_Semi,
+    Tok_Unknown,
+}
+
+#[derive(Debug)]
+struct Token {
+    tok_type: TOKEN_TYPE,
+    tok_value: String,
+}
+
+struct SourceFile {
+    name: String,
+    source: String,
+    source_len: usize,
+    index: usize,
+}
+
+impl SourceFile {
+    pub fn new(file_name: String, source_code: String) -> SourceFile {
+        SourceFile {
+            name: file_name,
+            source: source_code.clone(),
+            source_len: source_code.len(),
+            index: 0,
+        }
+    }
+
+    pub fn peek(&self, ahead: usize) -> Option<char> {
+        self.source.chars().nth(self.index + ahead)
+    }
+
+    pub fn consume(&mut self, amount: usize) -> bool {
+        if self.index + amount < self.source_len {
+            self.index += amount;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+fn get_token_type(tok_buf: String) -> TOKEN_TYPE {
+    let token_type: TOKEN_TYPE = match tok_buf.as_str() {
+        "return" => TOKEN_TYPE::Tok_Return,
+        _ => {
+            // Check if the token is a number
+            if tok_buf.chars().all(|c| c.is_digit(10)) {
+                TOKEN_TYPE::Tok_Number
+            } else {
+                TOKEN_TYPE::Tok_Unknown
+            }
+        }
+    };
+
+    token_type
+}
+
+fn is_number(token: String) -> bool {
+    // Cases to Handle
+    // int: i.e. 10, 1, 100, 3023, etc...
+    // float: 1.0, 10.10, 2.0005f, etc...
+    // eng. format: 10E6, 456E-3, 9084.34E9 etc...
+}
+
+fn parse(mut src: SourceFile) -> Vec<Token> {
+    let mut tokens: Vec<Token> = Vec::new();
+
+    while src.consume(1) {
+        let mut tok_buf = String::new();
+        let oc = src.peek(0);
+
+        let c: char = match oc {
+            Some(c) => c,
+            None => '\0',
+        };
+
+        // end of file or improper read of character condition
+        if c == '\0' {
+            return tokens;
+        }
+
+        if c != ' ' || c != '\n' {
+            tok_buf.push(c);
+        } else {
+            let mut token = Token {
+                tok_type: TOKEN_TYPE::Tok_Unknown,
+                tok_value: tok_buf.clone(),
+            };
+
+            match tok_buf.as_str() {
+                "return" => token.tok_type = TOKEN_TYPE::Tok_Return,
+                ";" => token.tok_type = TOKEN_TYPE::Tok_Semi,
+                _ => {
+                    if is_number(tok_buf)
+
+                    token.tok_type = TOKEN_TYPE::Tok_Unknown;
+                }
+            }
+
+            tokens.push(token);
+        }
+    }
+
+    //     for line in src.lines() {
+    //         if !line.starts_with("//") {
+    //             let mut tok_buf = String::new();
+    //             for c in line.chars() {
+    //                 if !c.is_whitespace() {
+    //                     tok_buf.push(c)
+    //                 } else {
+    //                     if !tok_buf.is_empty() {
+    //                         tokens.push(Token {
+    //                             tok_type: get_token_type(tok_buf.clone()),
+    //                             tok_value: tok_buf.clone(),
+    //                         });
+    //                         tok_buf.clear();
+    //                     }
+    //                 }
+    //             }
+    //
+    //             // Handle the last token
+    //             if !tok_buf.is_empty() {
+    //                 tokens.push(Token {
+    //                     tok_type: get_token_type(tok_buf.clone()),
+    //                     tok_value: tok_buf.clone(),
+    //                 });
+    //             }
+    //         }
+    //     }
+
+    tokens
+}
+
+fn lex(tokens: Vec<Token>) {
+    println!("Token count: {}", tokens.len());
+    for token in tokens {
+        println!("Token: {:?}", token);
+    }
+}
+
+fn main() {
+    let mut debug = false;
+    let args: Vec<String> = env::args().collect();
+    let mut source_files: Vec<SourceFile> = Vec::new();
+
+    if args.len() < 2 {
+        println!("Usage: zinc <file>");
+        return;
+    }
+
+    for arg in args.iter().skip(1) {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                println!("Usage: zinc <file>");
+                return;
+            }
+            "-d" | "--debug" => {
+                debug = true;
+            }
+            "-v" | "--version" => {
+                println!("zinc-compiler v{}", env!("CARGO_PKG_VERSION"));
+                return;
+            }
+            _ => {
+                let mut file = File::open(arg).unwrap();
+                let mut contents = String::new();
+                file.read_to_string(&mut contents).unwrap();
+                source_files.push(SourceFile::new(arg.to_string(), contents));
+            }
+        }
+    }
+
+    let tokens: Vec<Token> = parse(&source_files[0]);
+    lex(tokens);
+}

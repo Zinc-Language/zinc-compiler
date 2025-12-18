@@ -1,4 +1,17 @@
-// Simple Zinc test
-fun main() -> i32 {
-    return 41+1;
+// This is a test file for the AST generator.
+fn other(num: i32) -> bool { 
+    if (num % 2 == 0) {
+        return true;
+    } 
+    return false;
+}
+
+/// This is a doc comment
+fn main() -> i32 {
+    if (other(5)) { // comment after a line
+        @print("hello, world!");
+        @print("Escape sequences: \n\t \\ \"");
+    }
+
+    return 1;
 }
