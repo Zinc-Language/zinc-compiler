@@ -1,4 +1,11 @@
-#[derive(Debug, PartialEq)]
+/// Represents the value of a token.
+/// ### Fields
+/// - `String`: The string value of the token.
+/// - `Float`: The float value of the token.
+/// - `Integer`: The integer value of the token.
+/// - `Bool`: The boolean value of the token.
+/// - `None`: The token is None. (Useful for EOF)
+#[derive(Debug, PartialEq, Clone)]
 pub enum TokenValue {
     String(String),
     Float(f64),
@@ -11,7 +18,7 @@ pub enum TokenValue {
 /// ### Fields
 /// - `token_type`: The token type.
 /// - `value`: The value of the token as a String literal.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
     pub token_type: TokenType,
     pub value: String,
@@ -24,7 +31,7 @@ pub struct Token {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenType {
     // Keywords
-    Fn,
+    Function,
     If,
     Else,
     While,
@@ -40,6 +47,7 @@ pub enum TokenType {
     Static,
     Async,
     Enum,
+    Const,
     Macro,
 
     // Operators
@@ -128,6 +136,7 @@ pub enum TokenType {
     EOF,
 }
 
+/// A list of multi-character operators and their corresponding token types.
 const MULTI_CHAR_OPERATORS: &[(&str, TokenType)] = &[
     ("<<=", TokenType::LeftShiftAssign),
     (">>=", TokenType::RightShiftAssign),
@@ -228,7 +237,7 @@ impl SourceFile {
 fn get_token_type(token: &str) -> TokenType {
     match token {
         // Keywords
-        "fn" => TokenType::Fn,
+        "fun" => TokenType::Function,
         "if" => TokenType::If,
         "else" => TokenType::Else,
         "while" => TokenType::While,
@@ -261,6 +270,7 @@ fn get_token_type(token: &str) -> TokenType {
         "static" => TokenType::Static,
         "async" => TokenType::Async,
         "enum" => TokenType::Enum,
+        "const" => TokenType::Const,
 
         // Punctuation (single char)
         "." => TokenType::Dot,
@@ -356,6 +366,8 @@ pub fn handle_punctuation(source_file: &mut SourceFile, tokens: &mut Vec<Token>)
 
 /// Returns true if the given character is a punctuation character.
 /// Pretty much just a list of characters that are not part of an identifier.
+/// ### Arguments:
+/// - `c`: The character to check.
 fn is_punctuation(c: char) -> bool {
     matches!(
         c,
@@ -384,6 +396,17 @@ fn is_punctuation(c: char) -> bool {
     )
 }
 
+/// Returns the value of a token based on its type.
+/// ### Arguments
+/// - `token`: The token to get the value of.
+/// - `token_type`: The type of the token.
+/// ### Returns
+/// TokenValue (enum) representing the value of the token. Possible values are:
+/// - String: The string value of the token.
+/// - Float: The float value of the token.
+/// - Integer: The integer value of the token.
+/// - Bool: The boolean value of the token.
+/// - None: The token is None. (Useful for EOF)
 fn get_token_value(token: &str, token_type: &TokenType) -> TokenValue {
     if matches!(token_type, TokenType::StringLiteral) {
         return TokenValue::String(token.trim_matches('"').to_string());
@@ -544,6 +567,12 @@ fn handle_string_literal(source_file: &mut SourceFile, tokens: &mut Vec<Token>) 
     });
 }
 
+/// Handles comments by accumulating the comment into a single token.
+/// ### Arguments
+/// - `source_file`: The source file to handle the comment from.
+/// - `tokens`: The vector of tokens to add the comment token to.
+/// ### Returns
+/// True if the comment was handled, false otherwise.
 fn handle_comment(source_file: &mut SourceFile, tokens: &mut Vec<Token>) -> bool {
     let is_slash_slash = source_file.peek(1) == Some('/');
     let is_slash_star = source_file.peek(1) == Some('*');
@@ -603,6 +632,10 @@ fn handle_comment(source_file: &mut SourceFile, tokens: &mut Vec<Token>) -> bool
     true
 }
 
+/// Handles macros by accumulating the macro into a single token.
+/// ### Arguments
+/// - `source_file`: The source file to handle the macro from.
+/// - `tokens`: The vector of tokens to add the macro token to.
 fn handle_macro(source_file: &mut SourceFile, tokens: &mut Vec<Token>) {
     let mut macro_buf = String::new();
     let start_line = source_file.current_line;
@@ -617,16 +650,21 @@ fn handle_macro(source_file: &mut SourceFile, tokens: &mut Vec<Token>) {
         }
     }
 
+    let parsed_value = macro_buf.trim_start_matches('@');
     tokens.push(Token {
         token_type: TokenType::Macro,
         value: macro_buf.clone(),
-        parsed_value: TokenValue::String(macro_buf),
+        parsed_value: TokenValue::String(parsed_value.to_string()),
         line: start_line,
         column: start_column,
     });
 }
 
-// Lexical analysis
+/// Parses the given source code into a vector of tokens.
+/// ### Arguments
+/// - `source`: The source code to parse.
+/// ### Returns
+/// A vector of tokens (type Token) representing the source code.
 pub fn parse(source: String) -> Vec<Token> {
     let mut source_file = SourceFile::new(source);
     let mut tokens: Vec<Token> = Vec::new();
@@ -637,7 +675,20 @@ pub fn parse(source: String) -> Vec<Token> {
     let mut start_column = 1;
 
     while let Some(c) = source_file.peek(0) {
-        if c.is_whitespace() {
+        // Check for floats with a dot
+        let is_float_dot = c == '.'
+            && source_file.peek(1).map_or(false, |n| n.is_ascii_digit())
+            && (tok_buf.is_empty() || tok_buf.chars().all(|ch| ch.is_ascii_digit()));
+
+        // Handle floats
+        if is_float_dot {
+            if tok_buf.is_empty() {
+                start_line = source_file.current_line;
+                start_column = source_file.current_column;
+            }
+            tok_buf.push(c);
+            source_file.advance();
+        } else if c.is_whitespace() {
             // flush whatever is in the identifier buffer
             flush_buffer(&mut tokens, &mut tok_buf, start_line, start_column);
             handle_whitespace(&mut source_file, &mut tokens);
@@ -684,635 +735,384 @@ pub fn parse(source: String) -> Vec<Token> {
     tokens
 }
 
-// Courtesy of Google Gemini
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn get_values(input: &str) -> Vec<String> {
-        parse(input.to_string())
-            .into_iter()
-            // FIX: Add Comment, BlockComment, DocComment to filter
-            .filter(|t| {
-                !matches!(
-                    t.token_type,
-                    TokenType::Whitespace
-                        | TokenType::EOF
-                        | TokenType::Comment
-                        | TokenType::BlockComment
-                        | TokenType::DocComment
-                )
-            })
-            .map(|t| t.value)
-            .collect()
+
+    /// Helper to assert a single token's properties
+    fn assert_token(token: &Token, expected_type: TokenType, expected_value: &str) {
+        assert_eq!(
+            token.token_type, expected_type,
+            "Type mismatch for value {}",
+            expected_value
+        );
+        assert_eq!(token.value, expected_value, "Value mismatch");
     }
 
-    // ========================================================================
-    // 1. SourceFile Tests (The Foundation)
-    // ========================================================================
-
-    #[test]
-    fn test_source_file_advancement() {
-        let mut src = SourceFile::new("abc\ndef".to_string());
-
-        // Check initial state
-        assert_eq!(src.peek(0), Some('a'));
-        assert_eq!(src.current_line, 1);
-        assert_eq!(src.current_column, 1);
-
-        // Advance past 'a', 'b', 'c'
-        src.advance();
-        src.advance();
-        src.advance();
-
-        // Now at newline
-        assert_eq!(src.peek(0), Some('\n'));
-        assert_eq!(src.current_line, 1);
-        assert_eq!(src.current_column, 4);
-
-        // Advance past newline (should trigger line update)
-        src.advance();
-        assert_eq!(src.peek(0), Some('d'));
-        assert_eq!(src.current_line, 2);
-        assert_eq!(src.current_column, 1); // Reset column
+    /// Helper to verify line and column numbers
+    fn assert_location(token: &Token, line: usize, col: usize) {
+        assert_eq!(token.line, line, "Line mismatch for token {}", token.value);
+        assert_eq!(
+            token.column, col,
+            "Column mismatch for token {}",
+            token.value
+        );
     }
 
     #[test]
-    fn test_source_file_advance_by() {
-        let mut src = SourceFile::new("12345".to_string());
-        src.advance_by(3);
-        assert_eq!(src.peek(0), Some('4'));
-        assert_eq!(src.current_token_index, 3);
-    }
-
-    // ========================================================================
-    // 2. Whitespace Handler Tests
-    // ========================================================================
-
-    #[test]
-    fn test_handle_whitespace_basic() {
-        let mut src = SourceFile::new("   abc".to_string());
-        let mut tokens = Vec::new();
-
-        handle_whitespace(&mut src, &mut tokens);
-
-        // Should have 1 Whitespace token
+    fn test_01_empty_source() {
+        let tokens = parse("".to_string());
         assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].token_type, TokenType::Whitespace);
-        assert_eq!(tokens[0].value, "   ");
-
-        // Source should be pointing at 'a'
-        assert_eq!(src.peek(0), Some('a'));
+        assert_token(&tokens[0], TokenType::EOF, "");
     }
 
     #[test]
-    fn test_handle_whitespace_with_newline() {
-        let mut src = SourceFile::new("  \n".to_string());
-        let mut tokens = Vec::new();
-
-        handle_whitespace(&mut src, &mut tokens);
-
-        // Should have [Whitespace("  "), Newline("\n")]
-        assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0].token_type, TokenType::Whitespace);
-        assert_eq!(tokens[1].token_type, TokenType::Newline);
+    fn test_02_single_identifier() {
+        let tokens = parse("variable".to_string());
+        assert_token(&tokens[0], TokenType::Identifier, "variable");
     }
 
     #[test]
-    fn test_handle_whitespace_eof() {
-        // Critical edge case: File ends with spaces
-        let mut src = SourceFile::new("   ".to_string());
-        let mut tokens = Vec::new();
-
-        handle_whitespace(&mut src, &mut tokens);
-
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, "   ");
-    }
-
-    // ========================================================================
-    // 3. Punctuation Handler Tests
-    // ========================================================================
-
-    #[test]
-    fn test_handle_punctuation_maximal_munch() {
-        // Should prefer '<<=' over '<' or '<<' or '<='
-        let mut src = SourceFile::new("<<=".to_string());
-        let mut tokens = Vec::new();
-
-        handle_punctuation(&mut src, &mut tokens);
-
-        assert_eq!(tokens.len(), 1);
-        assert!(matches!(tokens[0].token_type, TokenType::LeftShiftAssign));
-        assert_eq!(tokens[0].value, "<<=");
+    fn test_03_keyword_fn() {
+        let tokens = parse("fun".to_string());
+        assert_token(&tokens[0], TokenType::Function, "fun");
     }
 
     #[test]
-    fn test_handle_punctuation_fallback() {
-        // '&' is a prefix for '&&' and '&=', but here it stands alone
-        let mut src = SourceFile::new("&a".to_string());
-        let mut tokens = Vec::new();
-
-        handle_punctuation(&mut src, &mut tokens);
-
-        assert_eq!(tokens.len(), 1);
-        assert!(matches!(tokens[0].token_type, TokenType::BitwiseAnd));
-        assert_eq!(tokens[0].value, "&");
-
-        // Ensure it didn't consume the 'a'
-        assert_eq!(src.peek(0), Some('a'));
-    }
-
-    // ========================================================================
-    // 4. Comment Handler Tests
-    // ========================================================================
-
-    #[test]
-    fn test_handle_single_line_comment() {
-        let mut src = SourceFile::new("// comment\nnext".to_string());
-        let mut tokens = Vec::new();
-
-        // We need to advance past the initial '/' manually because
-        // the main loop usually handles that check before calling handle_comment
-        let was_comment = handle_comment(&mut src, &mut tokens);
-
-        assert!(was_comment);
-        // Should stop at '\n' without consuming it
-        assert_eq!(src.peek(0), Some('\n'));
+    fn test_04_keyword_return() {
+        let tokens = parse("return".to_string());
+        assert_token(&tokens[0], TokenType::Return, "return");
     }
 
     #[test]
-    fn test_handle_block_comment() {
-        let mut src = SourceFile::new("/* block \n comment */after".to_string());
-        let mut tokens = Vec::new();
-
-        let was_comment = handle_comment(&mut src, &mut tokens);
-
-        assert!(was_comment);
-        // Should be pointing at 'a' in "after"
-        assert_eq!(src.peek(0), Some('a'));
+    fn test_05_keyword_class() {
+        let tokens = parse("class".to_string());
+        assert_token(&tokens[0], TokenType::Class, "class");
     }
 
     #[test]
-    fn test_handle_slash_is_not_comment() {
-        // Just a divide operator
-        let mut src = SourceFile::new("/ 5".to_string());
-        let mut tokens = Vec::new();
-
-        let was_comment = handle_comment(&mut src, &mut tokens);
-
-        assert!(!was_comment); // It returns false
-        // It should NOT have consumed the '/' or anything else
-        assert_eq!(src.peek(0), Some('/'));
+    fn test_06_integer_literal() {
+        let tokens = parse("12345".to_string());
+        assert_token(&tokens[0], TokenType::IntegerLiteral, "12345");
+        assert_eq!(tokens[0].parsed_value, TokenValue::Integer(12345));
     }
 
     #[test]
-    fn test_nested_asterisk_in_block_comment() {
-        // Edge case: /* * */ should handle the middle * correctly
-        let mut src = SourceFile::new("/* * */".to_string());
-        let mut tokens = Vec::new();
-        let was_comment = handle_comment(&mut src, &mut tokens);
-        assert!(was_comment);
-        assert_eq!(src.peek(0), None); // Should be at EOF
-    }
-
-    // ========================================================================
-    // 5. String Literal Handler Tests
-    // ========================================================================
-
-    #[test]
-    fn test_handle_string_simple() {
-        let mut src = SourceFile::new("\"hello\"".to_string());
-        let mut tokens = Vec::new();
-
-        handle_string_literal(&mut src, &mut tokens);
-
-        assert_eq!(tokens.len(), 1);
-        assert!(matches!(tokens[0].token_type, TokenType::StringLiteral));
-        assert_eq!(tokens[0].value, "hello");
+    fn test_07_float_literal() {
+        let tokens = parse("123.456".to_string());
+        assert_token(&tokens[0], TokenType::FloatLiteral, "123.456");
+        assert_eq!(tokens[0].parsed_value, TokenValue::Float(123.456));
     }
 
     #[test]
-    fn test_handle_string_escapes() {
-        // Input represents: " \" \\ "
-        let mut src = SourceFile::new(r#"" \" \\ ""#.to_string());
-        let mut tokens = Vec::new();
-
-        handle_string_literal(&mut src, &mut tokens);
-
-        assert_eq!(tokens.len(), 1);
-        // Value should be: " \
-        assert_eq!(tokens[0].value, r#" " \ "#);
-    }
-
-    // ========================================================================
-    // 6. Full Integration Tests (The Main Parse Loop)
-    // ========================================================================
-
-    // Helper for integration tests
-    fn get_types(input: &str) -> Vec<String> {
-        parse(input.to_string())
-            .iter()
-            .map(|t| format!("{:?}", t.token_type)) // Debug print the enum variant
-            .collect()
+    fn test_08_hex_literal() {
+        let tokens = parse("0xFF".to_string());
+        assert_token(&tokens[0], TokenType::IntegerLiteral, "0xFF");
+        assert_eq!(tokens[0].parsed_value, TokenValue::Integer(255));
     }
 
     #[test]
-    fn test_parse_function_variable_decl() {
-        let input = "let x = 10;";
-        // Note: 'let' is not in your keywords list yet, so it will be an Identifier
-        let types = get_types(input);
-
-        let expected = vec![
-            "Identifier", // let
-            "Whitespace",
-            "Identifier", // x
-            "Whitespace",
-            "Assign", // =
-            "Whitespace",
-            "Identifier", // 10 (since you don't have a Number type logic yet, 10 is an ident)
-            "Semicolon",  // ;
-            "EOF",
-        ];
-
-        assert_eq!(types, expected);
+    fn test_09_binary_literal() {
+        let tokens = parse("0b1010".to_string());
+        assert_token(&tokens[0], TokenType::IntegerLiteral, "0b1010");
+        assert_eq!(tokens[0].parsed_value, TokenValue::Integer(10));
     }
 
     #[test]
-    fn test_parse_function_mixed_no_spaces() {
-        // verifying delimiters separate tokens without needing spaces
-        let input = "fn(x)";
-        let types = get_types(input);
-
-        let expected = vec!["Fn", "LeftParen", "Identifier", "RightParen", "EOF"];
-
-        assert_eq!(types, expected);
-    }
-
-    // Weird Edge Cases
-
-    // ========================================================================
-    // 1. String Literal Edge Cases
-    // ========================================================================
-
-    #[test]
-    fn test_string_empty() {
-        let input = r#""""#; // Empty string ""
-        let tokens = parse(input.to_string());
-        let str_token = tokens
-            .iter()
-            .find(|t| matches!(t.token_type, TokenType::StringLiteral))
-            .unwrap();
-        assert_eq!(str_token.value, "");
+    fn test_10_octal_literal() {
+        let tokens = parse("0o77".to_string());
+        assert_token(&tokens[0], TokenType::IntegerLiteral, "0o77");
+        assert_eq!(tokens[0].parsed_value, TokenValue::Integer(63));
     }
 
     #[test]
-    fn test_string_escaped_backslash_at_end() {
-        // This is tricky: "abc\\" should be the string [abc\]
-        // If the lexer sees the last \" as an escaped quote, it will fail to close the string.
-        let input = r#" "abc\\" "#;
-        let tokens = parse(input.to_string());
-        let str_token = tokens
-            .iter()
-            .find(|t| matches!(t.token_type, TokenType::StringLiteral))
-            .unwrap();
-        assert_eq!(str_token.value, r#"abc\"#); // rust raw string syntax
+    fn test_11_string_simple() {
+        let tokens = parse("\"hello\"".to_string());
+        assert_token(&tokens[0], TokenType::StringLiteral, "hello");
+        assert_eq!(
+            tokens[0].parsed_value,
+            TokenValue::String("hello".to_string())
+        );
     }
 
     #[test]
-    fn test_string_unterminated() {
-        // File ends while inside a string
-        let input = r#" "unterminated "#;
-        let tokens = parse(input.to_string());
-
-        let str_token = tokens
-            .iter()
-            .find(|t| matches!(t.token_type, TokenType::StringLiteral));
-        // Depending on your implementation, this usually returns what it collected so far
-        assert!(str_token.is_some());
-        assert_eq!(str_token.unwrap().value, "unterminated ");
-    }
-
-    // ========================================================================
-    // 2. Comment Edge Cases
-    // ========================================================================
-
-    #[test]
-    fn test_comment_fake_outs() {
-        // Things that look like comments but aren't
-        let input = "/ * 5"; // Space between / and *
-        let values = get_values(input);
-        // Should be Division, Asterisk, Identifier(5)
-        assert_eq!(values, vec!["/", "*", "5"]);
+    fn test_12_string_empty() {
+        let tokens = parse("\"\"".to_string());
+        assert_token(&tokens[0], TokenType::StringLiteral, "");
     }
 
     #[test]
-    fn test_comment_unterminated_block() {
-        // File ends inside a block comment
-        let input = "/* starting comment...";
-        let values = get_values(input);
-        // Should return empty significant tokens (comment ate everything)
-        assert!(values.is_empty());
+    fn test_13_string_with_spaces() {
+        let tokens = parse("\"hello world\"".to_string());
+        assert_token(&tokens[0], TokenType::StringLiteral, "hello world");
     }
 
     #[test]
-    fn test_comment_nested_lookalike() {
-        // /* inside */ should close at the first */
-        let input = "/* comment /* nested? */ code";
-        let values = get_values(input);
-        // The first */ closes the comment. "code" should be tokenized.
-        assert_eq!(values, vec!["code"]);
+    fn test_14_string_escaped_quote() {
+        let tokens = parse("\"say \\\"hello\\\"\"".to_string());
+        assert_token(&tokens[0], TokenType::StringLiteral, "say \"hello\"");
     }
 
     #[test]
-    fn test_comment_ending_at_eof_no_newline() {
-        let input = "// comment at eof";
-        let tokens = parse(input.to_string());
-
-        // Check that the last token is EOF
-        assert_eq!(tokens.last().unwrap().token_type, TokenType::EOF);
-
-        // FIX: Expect 2 tokens (Comment + EOF), not 1
-        assert_eq!(tokens.len(), 2);
-
-        // Optional: Verify the first token is actually the comment
-        assert_eq!(tokens[0].token_type, TokenType::Comment);
-        assert_eq!(tokens[0].value, " comment at eof");
-    }
-
-    // ========================================================================
-    // 3. Punctuation & Maximal Munch Stress Tests
-    // ========================================================================
-
-    #[test]
-    fn test_punctuation_soup() {
-        // A sequence of characters that touches nearly every boundary condition
-        let input = "+++++";
-        let values = get_values(input);
-        // ++, ++, +
-        assert_eq!(values, vec!["++", "++", "+"]);
+    fn test_15_string_escaped_newline() {
+        let tokens = parse("\"Line\\nBreak\"".to_string());
+        assert_token(&tokens[0], TokenType::StringLiteral, "Line\nBreak");
     }
 
     #[test]
-    fn test_punctuation_tricky_equals() {
-        // !=== should be !=, ==
-        let input = "!===";
-        let values = get_values(input);
-        assert_eq!(values, vec!["!=", "=="]);
+    fn test_16_string_escaped_backslash() {
+        let tokens = parse("\"Path\\\\To\"".to_string());
+        assert_token(&tokens[0], TokenType::StringLiteral, "Path\\To");
     }
 
     #[test]
-    fn test_punctuation_touching_identifiers() {
-        // Ensure no spaces are needed
-        let input = "return(x+1);";
-        let values = get_values(input);
-        assert_eq!(values, vec!["return", "(", "x", "+", "1", ")", ";"]);
-    }
-
-    // ========================================================================
-    // 4. Identifier & Keyword Edge Cases
-    // ========================================================================
-
-    #[test]
-    fn test_identifier_containing_keywords() {
-        // 'if' is a keyword, 'iff' is an identifier
-        let input = "if iff return_val";
-        let values = get_values(input);
-
-        let tokens = parse(input.to_string());
-        let types: Vec<&TokenType> = tokens
-            .iter()
-            .filter(|t| !matches!(t.token_type, TokenType::Whitespace | TokenType::EOF))
-            .map(|t| &t.token_type)
-            .collect();
-
-        // Check values
-        assert_eq!(values, vec!["if", "iff", "return_val"]);
-
-        // Check types
-        assert_eq!(types[0], &TokenType::If);
-        assert_eq!(types[1], &TokenType::Identifier);
-        assert_eq!(types[2], &TokenType::Identifier);
+    fn test_17_bool_true() {
+        let tokens = parse("true".to_string());
+        assert_token(&tokens[0], TokenType::BoolLiteral, "true");
+        assert_eq!(tokens[0].parsed_value, TokenValue::Bool(true));
     }
 
     #[test]
-    fn test_identifier_mixed_case() {
-        // Assuming your language is case-sensitive
-        let input = "Return return RETURN";
-        let values = get_values(input);
-
-        let tokens = parse(input.to_string());
-        let types: Vec<&TokenType> = tokens
-            .iter()
-            .filter(|t| !matches!(t.token_type, TokenType::Whitespace | TokenType::EOF))
-            .map(|t| &t.token_type)
-            .collect();
-
-        assert_eq!(values, vec!["Return", "return", "RETURN"]);
-        assert_eq!(types[0], &TokenType::Identifier); // Capital R
-        assert_eq!(types[1], &TokenType::Return); // Keyword
-        assert_eq!(types[2], &TokenType::Identifier); // All caps
-    }
-
-    // ========================================================================
-    // 5. Whitespace Edge Cases
-    // ========================================================================
-
-    #[test]
-    fn test_file_only_whitespace() {
-        let input = "    \n   \t   ";
-        let tokens = parse(input.to_string());
-
-        // Should contain Whitespace, Newline, Whitespace, EOF
-        assert!(tokens.len() > 1);
-        assert_eq!(tokens.last().unwrap().token_type, TokenType::EOF);
+    fn test_18_bool_false() {
+        let tokens = parse("false".to_string());
+        assert_token(&tokens[0], TokenType::BoolLiteral, "false");
+        assert_eq!(tokens[0].parsed_value, TokenValue::Bool(false));
     }
 
     #[test]
-    fn test_empty_file() {
-        let input = "";
-        let tokens = parse(input.to_string());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].token_type, TokenType::EOF);
-    }
-
-    /// Helper to filter out Whitespace/EOF for cleaner assertions,
-    /// checking only the meaningful tokens and their locations.
-    fn parse_meaningful(input: &str) -> Vec<Token> {
-        parse(input.to_string())
-            .into_iter()
-            // FIX: Add Comment, BlockComment, DocComment to filter
-            .filter(|t| {
-                !matches!(
-                    t.token_type,
-                    TokenType::Whitespace
-                        | TokenType::Newline
-                        | TokenType::EOF
-                        | TokenType::Comment
-                        | TokenType::BlockComment
-                        | TokenType::DocComment
-                )
-            })
-            .collect()
-    }
-
-    /// Helper assertion to check a token's location and value
-    fn check_tok(token: &Token, expected_val: &str, line: usize, col: usize) {
-        assert_eq!(token.value, expected_val, "Token Value Mismatch");
-        assert_eq!(token.line, line, "Line Mismatch for '{}'", expected_val);
-        assert_eq!(token.column, col, "Column Mismatch for '{}'", expected_val);
-    }
-
-    // ==========================================
-    // 1. Basic Placement
-    // ==========================================
-
-    #[test]
-    fn test_loc_start_of_file() {
-        let input = "start";
-        let tokens = parse_meaningful(input);
-
-        // "start" should be at 1:1
-        check_tok(&tokens[0], "start", 1, 1);
+    fn test_19_null_literal() {
+        let tokens = parse("null".to_string());
+        assert_token(&tokens[0], TokenType::Null, "null");
+        assert_eq!(tokens[0].parsed_value, TokenValue::None);
     }
 
     #[test]
-    fn test_loc_horizontal_spacing() {
-        // "one" is 3 chars. Spaces at 4, 5, 6. "two" starts at 7.
-        let input = "one   two";
-        let tokens = parse_meaningful(input);
-
-        check_tok(&tokens[0], "one", 1, 1);
-        check_tok(&tokens[1], "two", 1, 7);
-    }
-
-    // ==========================================
-    // 2. Vertical Placement (Newlines)
-    // ==========================================
-
-    #[test]
-    fn test_loc_simple_newline_reset() {
-        // Line 1: 'a' (1:1)
-        // Line 2: 'b' (2:1)
-        let input = "a\nb";
-        let tokens = parse_meaningful(input);
-
-        check_tok(&tokens[0], "a", 1, 1);
-        // Ensure Newline tokens are processed correctly internally
-        // so that 'b' resets to column 1 on the next line.
-        check_tok(&tokens[1], "b", 2, 1);
+    fn test_20_single_line_comment() {
+        let tokens = parse("// This is a comment".to_string());
+        assert_token(&tokens[0], TokenType::Comment, " This is a comment");
     }
 
     #[test]
-    fn test_loc_indentation() {
-        // Line 1: 'fn' (1:1)
-        // Line 2: indent(2 spaces) -> 'x' starts at 2:3
-        let input = "fn\n  x";
-        let tokens = parse_meaningful(input);
-
-        check_tok(&tokens[0], "fn", 1, 1);
-        check_tok(&tokens[1], "x", 2, 3);
+    fn test_21_doc_comment() {
+        let tokens = parse("/// This is a doc comment".to_string());
+        assert_token(&tokens[0], TokenType::DocComment, " This is a doc comment");
     }
 
     #[test]
-    fn test_loc_multiple_empty_lines() {
-        // Line 1: x
-        // Line 2: (empty)
-        // Line 3: (empty)
-        // Line 4: y
-        let input = "x\n\n\ny";
-        let tokens = parse_meaningful(input);
-
-        check_tok(&tokens[0], "x", 1, 1);
-        check_tok(&tokens[1], "y", 4, 1);
-    }
-
-    // ==========================================
-    // 3. Compact Operators (No Whitespace)
-    // ==========================================
-
-    #[test]
-    fn test_loc_compact_arithmetic() {
-        // 1+2
-        // '1' -> 1:1
-        // '+' -> 1:2
-        // '2' -> 1:3
-        let input = "1+2";
-        let tokens = parse_meaningful(input);
-
-        check_tok(&tokens[0], "1", 1, 1);
-        check_tok(&tokens[1], "+", 1, 2);
-        check_tok(&tokens[2], "2", 1, 3);
+    fn test_22_block_comment_single_line() {
+        let tokens = parse("/* block */".to_string());
+        assert_token(&tokens[0], TokenType::BlockComment, " block ");
     }
 
     #[test]
-    fn test_loc_punctuation_maximal_munch() {
-        // Check that multi-char operators report the start position correctly
-        // "=="
-        // "==" starts at 1:1.
-        // "x" should be at 1:3.
-        let input = "==x";
-        let tokens = parse_meaningful(input);
-
-        check_tok(&tokens[0], "==", 1, 1);
-        check_tok(&tokens[1], "x", 1, 3);
-    }
-
-    // ==========================================
-    // 4. Complex Integration
-    // ==========================================
-
-    #[test]
-    fn test_loc_complex_code_block() {
-        // 1: if (true) {
-        // 2:     return;
-        // 3: }
-        let input = "if (true) {\n    return;\n}";
-        let tokens = parse_meaningful(input);
-
-        // Line 1
-        check_tok(&tokens[0], "if", 1, 1);
-        check_tok(&tokens[1], "(", 1, 4);
-        check_tok(&tokens[2], "true", 1, 5);
-        check_tok(&tokens[3], ")", 1, 9);
-        check_tok(&tokens[4], "{", 1, 11);
-
-        // Line 2
-        // 4 spaces indent, so return starts at 5
-        check_tok(&tokens[5], "return", 2, 5);
-        // return is 6 chars long (5..10), ; is at 11
-        check_tok(&tokens[6], ";", 2, 11);
-
-        // Line 3
-        check_tok(&tokens[7], "}", 3, 1);
-    }
-
-    // ==========================================
-    // 5. String Literals (Potential Bug Check)
-    // ==========================================
-
-    #[test]
-    fn test_loc_string_literal_start_position() {
-        // "hello"
-        // The token should ideally report the position of the *opening quote*.
-        // " starts at 1:1.
-        let input = "\"hello\"";
-        let tokens = parse_meaningful(input);
-
-        // NOTE: If your handle_string_literal implementation sets
-        // current_line/current_column AFTER the loop, this test will fail
-        // (it will report the end of string).
-        // Standard lexer behavior is to report the START.
-        check_tok(&tokens[0], "hello", 1, 1);
+    fn test_23_block_comment_multi_line() {
+        let tokens = parse("/* line1\nline2 */".to_string());
+        assert_token(&tokens[0], TokenType::BlockComment, " line1\nline2 ");
     }
 
     #[test]
-    fn test_loc_tokens_after_string() {
-        // "a" b
-        // "a" is length 3 (1,2,3). Space at 4. 'b' at 5.
-        let input = "\"a\" b";
-        let tokens = parse_meaningful(input);
+    fn test_24_operator_plus() {
+        let tokens = parse("+".to_string());
+        assert_token(&tokens[0], TokenType::Plus, "+");
+    }
 
-        check_tok(&tokens[0], "a", 1, 1);
-        check_tok(&tokens[1], "b", 1, 5);
+    #[test]
+    fn test_25_operator_increment() {
+        let tokens = parse("++".to_string());
+        assert_token(&tokens[0], TokenType::Increment, "++");
+    }
+
+    #[test]
+    fn test_26_operator_add_assign() {
+        let tokens = parse("+=".to_string());
+        assert_token(&tokens[0], TokenType::AddAssign, "+=");
+    }
+
+    #[test]
+    fn test_27_operator_arrow() {
+        let tokens = parse("->".to_string());
+        assert_token(&tokens[0], TokenType::Arrow, "->");
+    }
+
+    #[test]
+    fn test_28_operator_equality() {
+        let tokens = parse("==".to_string());
+        assert_token(&tokens[0], TokenType::Equals, "==");
+    }
+
+    #[test]
+    fn test_29_operator_not_equal() {
+        let tokens = parse("!=".to_string());
+        assert_token(&tokens[0], TokenType::NotEqual, "!=");
+    }
+
+    #[test]
+    fn test_30_operator_complex_shift_assign() {
+        let tokens = parse("<<=".to_string());
+        assert_token(&tokens[0], TokenType::LeftShiftAssign, "<<=");
+    }
+
+    #[test]
+    fn test_31_macro_basic() {
+        let tokens = parse("@my_macro".to_string());
+        assert_token(&tokens[0], TokenType::Macro, "@my_macro");
+        assert_eq!(
+            tokens[0].parsed_value,
+            TokenValue::String("my_macro".to_string())
+        );
+    }
+
+    #[test]
+    fn test_32_whitespace_handling() {
+        let tokens = parse("  ".to_string());
+        assert_token(&tokens[0], TokenType::Whitespace, "  ");
+    }
+
+    #[test]
+    fn test_33_newline_handling() {
+        let tokens = parse("\n".to_string());
+        assert_token(&tokens[0], TokenType::Newline, "\n");
+    }
+
+    #[test]
+    fn test_34_mixed_whitespace_newline() {
+        let tokens = parse(" \n ".to_string());
+        // Expect: Whitespace(" "), Newline, Whitespace(" "), EOF
+        assert_token(&tokens[0], TokenType::Whitespace, " ");
+        assert_token(&tokens[1], TokenType::Newline, "\n");
+        assert_token(&tokens[2], TokenType::Whitespace, " ");
+    }
+
+    #[test]
+    fn test_35_identifier_position_start() {
+        let tokens = parse("abc".to_string());
+        assert_location(&tokens[0], 1, 1);
+    }
+
+    #[test]
+    fn test_36_identifier_position_offset() {
+        let tokens = parse("  abc".to_string());
+        // Whitespace (1,1), abc (1,3)
+        assert_token(&tokens[1], TokenType::Identifier, "abc");
+        assert_location(&tokens[1], 1, 3);
+    }
+
+    #[test]
+    fn test_37_identifier_position_multiline() {
+        let tokens = parse("abc\ndef".to_string());
+        // abc (1,1), newline (1,4), def (2,1)
+        assert_token(&tokens[0], TokenType::Identifier, "abc");
+        assert_token(&tokens[2], TokenType::Identifier, "def");
+        assert_location(&tokens[2], 2, 1);
+    }
+
+    #[test]
+    fn test_38_negative_number_parsing() {
+        // The parser logic separates '-' as punctuation and the number as a literal
+        let tokens = parse("-5".to_string());
+        assert_token(&tokens[0], TokenType::Minus, "-");
+        assert_token(&tokens[1], TokenType::IntegerLiteral, "5");
+    }
+
+    #[test]
+    fn test_39_delimiter_parentheses() {
+        let tokens = parse("()".to_string());
+        assert_token(&tokens[0], TokenType::LeftParen, "(");
+        assert_token(&tokens[1], TokenType::RightParen, ")");
+    }
+
+    #[test]
+    fn test_40_delimiter_braces() {
+        let tokens = parse("{}".to_string());
+        assert_token(&tokens[0], TokenType::LeftBrace, "{");
+        assert_token(&tokens[1], TokenType::RightBrace, "}");
+    }
+
+    #[test]
+    fn test_41_semicolon_handling() {
+        let tokens = parse("x;".to_string());
+        assert_token(&tokens[0], TokenType::Identifier, "x");
+        assert_token(&tokens[1], TokenType::Semicolon, ";");
+    }
+
+    #[test]
+    fn test_42_type_keyword_parsing() {
+        let tokens = parse("String Vector i32".to_string());
+        assert_token(&tokens[0], TokenType::String, "String");
+        assert_token(&tokens[2], TokenType::Vector, "Vector");
+        assert_token(&tokens[4], TokenType::I32, "i32");
+    }
+
+    #[test]
+    fn test_43_maximal_munch_precedence() {
+        // Should parse as LessThanOrEqual (<=), not LessThan (<) and Assign (=)
+        let tokens = parse("<=".to_string());
+        assert_token(&tokens[0], TokenType::LessThanOrEqual, "<=");
+        assert_eq!(tokens.len(), 2); // Includes EOF
+    }
+
+    #[test]
+    fn test_44_maximal_munch_failure_case() {
+        // "<" and "-" do not make a multi-char operator, should be two tokens
+        let tokens = parse("<-".to_string());
+        assert_token(&tokens[0], TokenType::LessThan, "<");
+        assert_token(&tokens[1], TokenType::Minus, "-");
+    }
+
+    #[test]
+    fn test_45_complex_expression() {
+        let tokens = parse("if(x==10){return;}".to_string());
+        assert_token(&tokens[0], TokenType::If, "if");
+        assert_token(&tokens[1], TokenType::LeftParen, "(");
+        assert_token(&tokens[2], TokenType::Identifier, "x");
+        assert_token(&tokens[3], TokenType::Equals, "==");
+        assert_token(&tokens[4], TokenType::IntegerLiteral, "10");
+        // Parsed value should be an integer
+        assert_eq!(tokens[4].parsed_value, TokenValue::Integer(10));
+        assert_token(&tokens[5], TokenType::RightParen, ")");
+        assert_token(&tokens[6], TokenType::LeftBrace, "{");
+        assert_token(&tokens[7], TokenType::Return, "return");
+        assert_token(&tokens[8], TokenType::Semicolon, ";");
+        assert_token(&tokens[9], TokenType::RightBrace, "}");
+    }
+
+    #[test]
+    fn test_46_comment_ends_at_eof() {
+        // Ensure comment parsing doesn't crash if file ends without newline
+        let tokens = parse("// comment at end".to_string());
+        assert_token(&tokens[0], TokenType::Comment, " comment at end");
+    }
+
+    #[test]
+    fn test_47_unterminated_string_at_eof() {
+        // This tests the loop condition in handle_string_literal
+        // Based on logic, it stops at EOF.
+        let tokens = parse("\"unterminated".to_string());
+        assert_token(&tokens[0], TokenType::StringLiteral, "unterminated");
+    }
+
+    #[test]
+    fn test_48_float_starts_with_zero() {
+        let tokens = parse("0.5".to_string());
+        assert_token(&tokens[0], TokenType::FloatLiteral, "0.5");
+        assert_eq!(tokens[0].parsed_value, TokenValue::Float(0.5));
+    }
+
+    #[test]
+    fn test_49_multiple_operators_no_space() {
+        let tokens = parse("a+b*c".to_string());
+        assert_token(&tokens[0], TokenType::Identifier, "a");
+        assert_token(&tokens[1], TokenType::Plus, "+");
+        assert_token(&tokens[2], TokenType::Identifier, "b");
+        assert_token(&tokens[3], TokenType::Multiply, "*");
+        assert_token(&tokens[4], TokenType::Identifier, "c");
+    }
+
+    #[test]
+    fn test_50_bitwise_ops() {
+        let tokens = parse("& | ^".to_string());
+        assert_token(&tokens[0], TokenType::BitwiseAnd, "&");
+        assert_token(&tokens[2], TokenType::BitwiseOr, "|");
+        assert_token(&tokens[4], TokenType::BitwiseXor, "^");
     }
 }

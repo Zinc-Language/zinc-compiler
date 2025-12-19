@@ -1,14 +1,47 @@
 // This is a test file for the AST generator.
-fn other(num: i32) -> bool { 
+fun even(num: i32) -> bool { 
     if (num % 2 == 0) {
         return true;
     } 
     return false;
 }
 
+/// Error handling
+/// Errors are a special type that can be returned from functions.
+/// They are created with the Err constructor.
+/// The first argument is the error code, and the second is the error message.
+/// The error code is an integer, and the error message is a string.
+
+// Division function
+fun divide(x: f32, y: f32) -> Result<f32> {
+    if (y == 0) {
+        Err(-1, "You can't divide by zero");
+    }
+    return x / y;
+}
+
+// Constants
+const X: f32 = 123.456;
+const Y: f32 = 0.0;
+
+enum Colors {
+    RED,
+    ORANGE,
+    YELLOW,
+    GREEN,
+    BLUE,
+    INDIGO, 
+    VIOLET,
+}
+
 /// This is a doc comment
-fn main() -> i32 {
-    if (other(5)) { // comment after a line
+fun main() -> i32 {
+    divide(X, Y).catch((Err e) => {
+        @eprintln(e.message);
+        return -1;
+    });
+
+    if (even(5)) { // comment after a line
         @print("hello, world!");
         @print("Escape sequences: \n\t \\ \"");
     }

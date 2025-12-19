@@ -1,5 +1,8 @@
 use std::fs;
+use std::io::Write;
 
+mod ast;
+mod ast_generator;
 mod parser;
 
 // Basic Colors
@@ -25,12 +28,20 @@ const BRIGHT_CYAN: &str = "\x1b[96m";
 // Special
 const GRAY: &str = "\x1b[90m"; // Perfect for comments
 
+struct SourceFile {
+    path: String,
+    contents: String,
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let mut source_files: Vec<String> = Vec::new();
+    let mut source_files: Vec<SourceFile> = Vec::new();
+
     let mut print_hightlight = false;
     let mut show_token_start = false;
     let mut print_tokens = false;
+    let mut export_tokens = false;
+    let mut print_ast = false;
 
     let mut i = 0;
     while i < args.len() - 1 {
@@ -44,33 +55,55 @@ fn main() {
                 let output = args[i].as_str();
                 println!("output: {}", output);
             }
-            "-h" | "--help" => {
+            "--help" | "-h" => {
                 println!("usage: zincc [options] <file.zc>");
                 println!("options:");
-                println!("  -o <output file>");
+                println!("  -h, --help\t\t\t Prints this help message");
+                println!(
+                    "  -o <output path>\t\t Outputs the compiled binary to the specified file"
+                );
+                println!(
+                    "  -sts, --show-token-start\t Prints the source code with the token start marker"
+                );
+                println!("  -pt, --print-tokens\t\t Prints the raw token contents");
+                println!("  -et, --export-tokens\t\t Exports the raw token contents to a file");
+                println!(
+                    "  -ph, --print-highlight\t Prints the source code with highlighted tokens"
+                );
             }
-            "--print-highlight" => {
-                print_hightlight = true;
-            }
-            "--show-token-start" => {
+            "--show-token-start" | "-sts" => {
                 show_token_start = true;
             }
-            "--print-tokens" => {
+            "--print-tokens" | "-pt" => {
                 print_tokens = true;
+            }
+            "--export-tokens" | "-et" => {
+                export_tokens = true;
+            }
+            "--print-highlight" | "-ph" => {
+                print_hightlight = true;
+            }
+            "--print-ast" | "-pa" => {
+                print_ast = true;
             }
             _ => {
                 // Assume it's a file
                 let file_name = arg;
                 let contents = fs::read_to_string(file_name).unwrap();
-                source_files.push(contents);
+                source_files.push(SourceFile {
+                    path: file_name.to_string(),
+                    contents,
+                });
             }
         }
     }
 
-    for source_code in source_files {
+    for file in source_files {
+        let source_code = file.contents;
+        let tokens = parser::parse(source_code.clone());
+
         if print_hightlight {
             println!();
-            let tokens = parser::parse(source_code.clone());
             let lines: Vec<&str> = source_code.lines().collect();
 
             // Group tokens by line for faster lookup
@@ -98,14 +131,16 @@ fn main() {
                 for token in line_tokens {
                     // Determine color based on token type
                     let color = match token.token_type {
-                        parser::TokenType::Fn
+                        parser::TokenType::Function
                         | parser::TokenType::If
                         | parser::TokenType::Else
                         | parser::TokenType::While
                         | parser::TokenType::For
                         | parser::TokenType::Return
                         | parser::TokenType::Break
-                        | parser::TokenType::Continue => BRIGHT_MAGENTA,
+                        | parser::TokenType::Continue
+                        | parser::TokenType::Enum
+                        | parser::TokenType::Const => BRIGHT_MAGENTA,
 
                         parser::TokenType::I32
                         | parser::TokenType::I64
@@ -216,16 +251,33 @@ fn main() {
                 println!("{:>4}: {}", line_number, colored_line);
                 // We use the same color logic for markers to make it look cool (optional)
                 if show_token_start {
-                    println!("      {}", marker_line.into_iter().collect::<String>());
+                    println!("    : {}", marker_line.into_iter().collect::<String>());
                 }
             }
             println!();
         }
         if print_tokens {
-            let tokens = parser::parse(source_code.clone());
-            for token in tokens {
+            for token in tokens.clone() {
                 println!("{:?}", token);
             }
+        }
+        if export_tokens {
+            let file_name = file.path.clone();
+            let mut file_name = file_name.split("/").last().unwrap().to_string();
+            file_name.push_str(".tokens");
+            let mut file = fs::File::create(file_name.clone()).unwrap();
+            for token in tokens.clone() {
+                file.write_all(format!("{:?}\n", token).as_bytes()).unwrap();
+            }
+            println!("Exported tokens to: {}", file_name);
+        }
+        println!("Processed file: {}", file.path);
+
+        let mut generator = ast_generator::AstGenerator::new(tokens.clone());
+        let program = generator.parse_program();
+
+        if print_ast {
+            println!("\nAST:\n{}", program);
         }
     }
 }
