@@ -56,7 +56,7 @@ fn main() {
                 println!("output: {}", output);
             }
             "--help" | "-h" => {
-                println!("usage: zincc [options] <file.zc>");
+                println!("usage: zinc [options] <file.zc>");
                 println!("options:");
                 println!("  -h, --help\t\t\t Prints this help message");
                 println!(
